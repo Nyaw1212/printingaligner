@@ -1,4 +1,5 @@
 import json
+import shutil
 import os
 import subprocess
 import sys
@@ -9,6 +10,8 @@ from PIL import Image, ImageTk
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / "layout.json"
+CACHE_DIR = ROOT / ".cache"
+CACHE_BG = CACHE_DIR / "background.png"
 DPI = 75
 PAGE_W, PAGE_H = 11 * DPI, 8.5 * DPI
 
@@ -35,6 +38,7 @@ class App:
         self.syncing = False
         self.build()
         self.load()
+        root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind_all("<Control-z>", self.undo)
         root.bind_all("<Control-y>", self.redo)
         root.bind_all("<Control-Shift-Z>", self.redo)
@@ -48,6 +52,7 @@ class App:
             self.undo_stack.append(before)
             self.undo_stack = self.undo_stack[-100:]
             self.redo_stack.clear()
+            self.autosave()
 
     def restore(self, state):
         data = json.loads(state)
@@ -62,6 +67,7 @@ class App:
             self.value.set("")
             self.syncing = False
         self.drag = None
+        self.autosave()
         self.render()
 
     def undo(self, event=None):
@@ -85,7 +91,7 @@ class App:
     def build(self):
         bar = ttk.Frame(self.root, padding=8)
         bar.pack(fill="x")
-        for label, command in [("Load Background", self.background), ("Add Text", self.add_field), ("Save Layout", self.save), ("Undo", self.undo), ("Redo", self.redo), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
+        for label, command in [("Load Background", self.background), ("Remove BG", self.remove_background), ("Add Text", self.add_field), ("Save Layout", self.save), ("Undo", self.undo), ("Redo", self.redo), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
             ttk.Button(bar, text=label, command=command).pack(side="left", padx=3)
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True)
@@ -154,9 +160,33 @@ class App:
         p = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp")])
         if p:
             before = self.snapshot()
-            self.bg_path = p
+            CACHE_DIR.mkdir(exist_ok=True)
+            try:
+                with Image.open(p) as image:
+                    image.convert("RGB").save(CACHE_BG)
+                self.bg_path = str(CACHE_BG)
+            except Exception as exc:
+                messagebox.showerror("Background error", str(exc))
+                return
             self.remember(before)
             self.render()
+
+    def remove_background(self):
+        if self.bg_path:
+            before = self.snapshot()
+            self.bg_path = None
+            self.remember(before)
+            self.render()
+
+    def autosave(self):
+        try:
+            CONFIG.write_text(json.dumps({"background": self.bg_path, "fields": self.fields}, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def close(self):
+        self.autosave()
+        self.root.destroy()
 
     def add_field(self):
         before = self.snapshot()
@@ -256,7 +286,7 @@ class App:
         self.render()
 
     def save(self):
-        CONFIG.write_text(json.dumps({"background": self.bg_path, "fields": self.fields}, indent=2), encoding="utf-8")
+        self.autosave()
         messagebox.showinfo("Saved", "Layout saved locally.")
 
     def load(self):
@@ -317,6 +347,7 @@ class App:
     def update(self):
         if not messagebox.askyesno("Update & Restart", "Pull latest code from GitHub and restart?"): return
         script = ROOT / "update_and_restart.py"
+        self.autosave()
         subprocess.Popen([sys.executable, str(script), str(os.getpid())], cwd=ROOT)
         self.root.destroy()
 
