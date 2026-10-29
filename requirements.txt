@@ -1,1 +1,2 @@
-Pillow>=10.0\nreportlab>=4.0\n
+Pillow>=10.0
+reportlab>=4.0
