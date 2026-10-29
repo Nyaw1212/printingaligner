@@ -1,0 +1,1 @@
+# Printing Aligner\nPython desktop application for aligning text on preprinted Letter-size leave cards.\n\nRun `run.bat` on Windows. Load a scanned background, add and drag text, save layout, and export a text-only PDF. Print at 100% / Actual Size. Update & Restart runs `git pull --ff-only origin main` and relaunches.\n
