@@ -31,7 +31,8 @@ class App:
         self.redo_stack = []
         self.drag_snapshot = None
         self.scale = DPI
-        self.font_families = sorted(tkfont.families(root))
+        self.font_families = ["Arial Bold", "Bahnschrift SemiBold", "Arial Black", "Stencil", "Agency FB Bold", "Bahnschrift Light"]
+        self.syncing = False
         self.build()
         self.load()
         root.bind_all("<Control-z>", self.undo)
@@ -57,7 +58,9 @@ class App:
             self.sync()
         else:
             self.active = None
+            self.syncing = True
             self.value.set("")
+            self.syncing = False
         self.drag = None
         self.render()
 
@@ -103,8 +106,8 @@ class App:
         self.font = tk.StringVar(value="12")
         ttk.Combobox(side, textvariable=self.font, values=["8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32"], width=24).pack()
         ttk.Label(side, text="Font type").pack(anchor="w")
-        self.family = tk.StringVar(value="Arial")
-        ttk.Combobox(side, textvariable=self.family, values=self.font_families, width=24).pack()
+        self.family = tk.StringVar(value="Arial Bold")
+        ttk.Combobox(side, textvariable=self.family, values=self.font_families, width=24, state="readonly").pack()
         ttk.Label(side, text="Character spacing (pt)").pack(anchor="w")
         self.spacing = tk.StringVar(value="0")
         ttk.Spinbox(side, from_=-10, to=30, increment=0.25, textvariable=self.spacing, width=24).pack()
@@ -114,20 +117,38 @@ class App:
         color_row.pack(fill="x")
         ttk.Entry(color_row, textvariable=self.color, width=16).pack(side="left")
         ttk.Button(color_row, text="Choose...", command=self.choose_color).pack(side="left", padx=3)
-        ttk.Button(side, text="Apply", command=self.apply).pack(fill="x", pady=8)
         ttk.Button(side, text="Delete Field", command=self.delete).pack(fill="x")
         ttk.Label(side, text="Drag text to position.\nPDF excludes background.\nCoordinates start top-left.").pack(pady=16)
         self.canvas.bind("<Configure>", lambda e: self.render())
         self.canvas.bind("<Button-1>", self.select)
         self.canvas.bind("<B1-Motion>", self.move)
         self.canvas.bind("<ButtonRelease-1>", self.end_drag)
+        for variable in (self.value, self.x, self.y, self.font, self.family, self.spacing, self.color):
+            variable.trace_add("write", self.live_apply)
+        self.render()
+
+    def live_apply(self, *_):
+        if self.syncing or self.active is None:
+            return
+        try:
+            x, y = float(self.x.get()), float(self.y.get())
+            size, spacing = int(self.font.get()), float(self.spacing.get())
+            color = self.color.get()
+            self.root.winfo_rgb(color)
+            if size <= 0:
+                return
+        except (ValueError, tk.TclError):
+            return
+        before = self.snapshot()
+        self.fields[self.active].update(text=self.value.get(), x=x, y=y, size=size,
+            family=self.family.get(), color=color, spacing=spacing)
+        self.remember(before)
         self.render()
 
     def choose_color(self):
         result = colorchooser.askcolor(color=self.color.get(), parent=self.root)
         if result[1]:
             self.color.set(result[1])
-            self.apply()
 
     def background(self):
         p = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp")])
@@ -139,7 +160,7 @@ class App:
 
     def add_field(self):
         before = self.snapshot()
-        f = {"text": "Employee Name", "x": 30.0, "y": 25.0, "size": 12, "family": "Arial", "color": "#000000", "spacing": 0.0}
+        f = {"text": "Employee Name", "x": 30.0, "y": 25.0, "size": 12, "family": "Arial Bold", "color": "#000000", "spacing": 0.0}
         self.fields.append(f)
         self.remember(before)
         self.active = len(self.fields) - 1
@@ -149,6 +170,7 @@ class App:
     def sync(self):
         if self.active is None: return
         f = self.fields[self.active]
+        self.syncing = True
         self.value.set(f["text"])
         self.x.set(str(round(f["x"], 2)))
         self.y.set(str(round(f["y"], 2)))
@@ -156,6 +178,7 @@ class App:
         self.family.set(f.get("family", "Arial"))
         self.color.set(f.get("color", "#000000"))
         self.spacing.set(str(f.get("spacing", 0)))
+        self.syncing = False
 
     def apply(self):
         if self.active is None: return
@@ -196,7 +219,11 @@ class App:
         for i, f in enumerate(self.fields):
             px = x + f["x"] / 25.4 * self.scale
             py = y + f["y"] / 25.4 * self.scale
-            font_obj = tkfont.Font(family=f.get("family", "Arial"), size=-max(1, round(f["size"] * self.scale / 72)))
+            family = f.get("family", "Arial Bold")
+            bold = family.endswith(" Bold") or family == "Arial Black" or family == "Bahnschrift SemiBold"
+            base_family = family.replace(" Bold", "").replace(" SemiBold", "").replace(" Light", "")
+            font_obj = tkfont.Font(family=base_family, weight="bold" if bold else "normal",
+                                   size=-max(1, round(f["size"] * self.scale / 72)))
             tracking = float(f.get("spacing", 0)) * self.scale / 72
             color = f.get("color", "#000000")
             cursor = px
@@ -254,7 +281,7 @@ class App:
         font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
         registered = {}
         for f in self.fields:
-            family = f.get("family", "Arial")
+            family = f.get("family", "Arial Bold")
             if family not in registered:
                 candidate = None
                 for name in [family.replace(" ", "") + ".ttf", family.replace(" ", "") .lower() + ".ttf"]:
@@ -262,7 +289,7 @@ class App:
                         candidate = font_dir / name
                         break
                 if candidate is None:
-                    aliases = {"Arial": "arial.ttf", "Times New Roman": "times.ttf", "Calibri": "calibri.ttf", "Consolas": "consola.ttf", "Verdana": "verdana.ttf", "Tahoma": "tahoma.ttf", "Georgia": "georgia.ttf"}
+                    aliases = {"Arial Bold": "arialbd.ttf", "Bahnschrift SemiBold": "bahnschrift.ttf", "Bahnschrift Light": "bahnschrift.ttf", "Arial Black": "ariblk.ttf", "Stencil": "STENCIL.TTF", "Agency FB Bold": "AGENCYB.TTF", "Arial": "arial.ttf", "Times New Roman": "times.ttf", "Calibri": "calibri.ttf", "Consolas": "consola.ttf", "Verdana": "verdana.ttf", "Tahoma": "tahoma.ttf", "Georgia": "georgia.ttf"}
                     pfont = font_dir / aliases.get(family, "")
                     if pfont.is_file(): candidate = pfont
                 if candidate:
