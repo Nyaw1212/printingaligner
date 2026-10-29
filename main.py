@@ -10,7 +10,7 @@ from PIL import Image, ImageTk
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / "layout.json"
 DPI = 75
-PAGE_W, PAGE_H = 8.5 * DPI, 11 * DPI
+PAGE_W, PAGE_H = 11 * DPI, 8.5 * DPI
 
 class App:
     def __init__(self, root):
@@ -151,13 +151,13 @@ class App:
 
     def export_pdf(self):
         from reportlab.pdfgen import canvas as pdfcanvas
-        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.pagesizes import landscape, letter
         p = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
         if not p: return
-        pdf = pdfcanvas.Canvas(p, pagesize=letter)
+        pdf = pdfcanvas.Canvas(p, pagesize=landscape(letter))
         for f in self.fields:
             pdf.setFont("Helvetica", f["size"])
-            pdf.drawString(f["x"]/25.4*72, 792-f["y"]/25.4*72-f["size"], f["text"])
+            pdf.drawString(f["x"]/25.4*72, 612-f["y"]/25.4*72-f["size"], f["text"])
         pdf.save()
         messagebox.showinfo("Ready", "Text-only Letter PDF created. Print at Actual Size / 100%.")
 
