@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, font as tkfont
+from tkinter import filedialog, messagebox, ttk, colorchooser, font as tkfont
 from pathlib import Path
 from PIL import Image, ImageTk
 
@@ -58,6 +58,15 @@ class App:
         ttk.Label(side, text="Font type").pack(anchor="w")
         self.family = tk.StringVar(value="Arial")
         ttk.Combobox(side, textvariable=self.family, values=self.font_families, width=24).pack()
+        ttk.Label(side, text="Character spacing (pt)").pack(anchor="w")
+        self.spacing = tk.StringVar(value="0")
+        ttk.Spinbox(side, from_=-10, to=30, increment=0.25, textvariable=self.spacing, width=24).pack()
+        ttk.Label(side, text="Font color").pack(anchor="w")
+        self.color = tk.StringVar(value="#000000")
+        color_row = ttk.Frame(side)
+        color_row.pack(fill="x")
+        ttk.Entry(color_row, textvariable=self.color, width=16).pack(side="left")
+        ttk.Button(color_row, text="Choose...", command=self.choose_color).pack(side="left", padx=3)
         ttk.Button(side, text="Apply", command=self.apply).pack(fill="x", pady=8)
         ttk.Button(side, text="Delete Field", command=self.delete).pack(fill="x")
         ttk.Label(side, text="Drag text to position.\nPDF excludes background.\nCoordinates start top-left.").pack(pady=16)
@@ -67,6 +76,12 @@ class App:
         self.canvas.bind("<ButtonRelease-1>", lambda e: setattr(self, "drag", None))
         self.render()
 
+    def choose_color(self):
+        result = colorchooser.askcolor(color=self.color.get(), parent=self.root)
+        if result[1]:
+            self.color.set(result[1])
+            self.apply()
+
     def background(self):
         p = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp")])
         if p:
@@ -74,7 +89,7 @@ class App:
             self.render()
 
     def add_field(self):
-        f = {"text": "Employee Name", "x": 30.0, "y": 25.0, "size": 12, "family": "Arial"}
+        f = {"text": "Employee Name", "x": 30.0, "y": 25.0, "size": 12, "family": "Arial", "color": "#000000", "spacing": 0.0}
         self.fields.append(f)
         self.active = len(self.fields) - 1
         self.sync()
@@ -88,15 +103,17 @@ class App:
         self.y.set(str(round(f["y"], 2)))
         self.font.set(str(f["size"]))
         self.family.set(f.get("family", "Arial"))
+        self.color.set(f.get("color", "#000000"))
+        self.spacing.set(str(f.get("spacing", 0)))
 
     def apply(self):
         if self.active is None: return
         try:
             f = self.fields[self.active]
-            f.update(text=self.value.get(), x=float(self.x.get()), y=float(self.y.get()), size=int(self.font.get()), family=self.family.get())
+            f.update(text=self.value.get(), x=float(self.x.get()), y=float(self.y.get()), size=int(self.font.get()), family=self.family.get(), color=self.color.get(), spacing=float(self.spacing.get()))
             self.render()
-        except ValueError:
-            messagebox.showerror("Invalid value", "Use numeric coordinates and font size.")
+        except (ValueError, tk.TclError):
+            messagebox.showerror("Invalid value", "Check coordinates, font size, color and spacing.")
 
     def delete(self):
         if self.active is not None:
@@ -124,8 +141,14 @@ class App:
         for i, f in enumerate(self.fields):
             px = x + f["x"] / 25.4 * self.scale
             py = y + f["y"] / 25.4 * self.scale
-            c.create_text(px, py, text=f["text"], anchor="nw", fill="#005ac8" if i == self.active else "#111",
-                          font=(f.get("family", "Arial"), max(1, round(f["size"] * self.scale / 72))), tags=(f"field_{i}", "field"))
+            font_obj = tkfont.Font(family=f.get("family", "Arial"), size=-max(1, round(f["size"] * self.scale / 72)))
+            tracking = float(f.get("spacing", 0)) * self.scale / 72
+            color = f.get("color", "#000000")
+            cursor = px
+            for ch in f["text"]:
+                c.create_text(cursor, py, text=ch, anchor="nw", fill=color, font=font_obj,
+                              tags=(f"field_{i}", "field"))
+                cursor += font_obj.measure(ch) + tracking
 
     def select(self, event):
         items = self.canvas.find_overlapping(event.x-3, event.y-3, event.x+3, event.y+3)
@@ -196,7 +219,15 @@ class App:
                 else:
                     registered[family] = "Helvetica"
             pdf.setFont(registered[family], f["size"])
-            pdf.drawString(f["x"]/25.4*72, 612-f["y"]/25.4*72-f["size"], f["text"])
+            try:
+                pdf.setFillColor(f.get("color", "#000000"))
+            except ValueError:
+                pdf.setFillColor("#000000")
+            obj = pdf.beginText(f["x"]/25.4*72, 612-f["y"]/25.4*72-f["size"])
+            obj.setFont(registered[family], f["size"])
+            obj.setCharSpace(float(f.get("spacing", 0)))
+            obj.textOut(f["text"])
+            pdf.drawText(obj)
         pdf.save()
         messagebox.showinfo("Ready", "Text-only Letter PDF created. Print at Actual Size / 100%.")
 
