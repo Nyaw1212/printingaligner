@@ -39,6 +39,9 @@ class App:
         self.build()
         self.load()
         root.protocol("WM_DELETE_WINDOW", self.close)
+        for key, dx, dy in (("Up", 0, -1), ("Down", 0, 1), ("Left", -1, 0), ("Right", 1, 0)):
+            root.bind_all("<" + key + ">", lambda e, x=dx, y=dy: self.nudge(e, x, y))
+            root.bind_all("<Shift-" + key + ">", lambda e, x=dx, y=dy: self.nudge(e, x, y, fast=True))
         root.bind_all("<Control-z>", self.undo)
         root.bind_all("<Control-y>", self.redo)
         root.bind_all("<Control-Shift-Z>", self.redo)
@@ -80,6 +83,22 @@ class App:
         if self.redo_stack:
             self.undo_stack.append(self.snapshot())
             self.restore(self.redo_stack.pop())
+        return "break"
+
+    def nudge(self, event, dx, dy, fast=False):
+        # Preserve normal caret and selection movement in editable widgets.
+        if isinstance(event.widget, (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox, ttk.Spinbox, tk.Spinbox)):
+            return None
+        if self.active is None or not (0 <= self.active < len(self.fields)):
+            return None
+        before = self.snapshot()
+        step = 1.0 if fast else 0.1
+        field = self.fields[self.active]
+        field["x"] = round(field["x"] + dx * step, 3)
+        field["y"] = round(field["y"] + dy * step, 3)
+        self.remember(before)
+        self.sync()
+        self.render()
         return "break"
 
     def end_drag(self, event=None):
