@@ -27,15 +27,62 @@ class App:
         self.fields = []
         self.active = None
         self.drag = None
+        self.undo_stack = []
+        self.redo_stack = []
+        self.drag_snapshot = None
         self.scale = DPI
         self.font_families = sorted(tkfont.families(root))
         self.build()
         self.load()
+        root.bind_all("<Control-z>", self.undo)
+        root.bind_all("<Control-y>", self.redo)
+        root.bind_all("<Control-Shift-Z>", self.redo)
+        root.bind_all("<Control-Shift-z>", self.redo)
+
+    def snapshot(self):
+        return json.dumps({"fields": self.fields, "background": self.bg_path, "active": self.active}, sort_keys=True)
+
+    def remember(self, before):
+        if before != self.snapshot():
+            self.undo_stack.append(before)
+            self.undo_stack = self.undo_stack[-100:]
+            self.redo_stack.clear()
+
+    def restore(self, state):
+        data = json.loads(state)
+        self.fields = data["fields"]
+        self.bg_path = data["background"]
+        self.active = data["active"]
+        if self.active is not None and self.active < len(self.fields):
+            self.sync()
+        else:
+            self.active = None
+            self.value.set("")
+        self.drag = None
+        self.render()
+
+    def undo(self, event=None):
+        if self.undo_stack:
+            self.redo_stack.append(self.snapshot())
+            self.restore(self.undo_stack.pop())
+        return "break"
+
+    def redo(self, event=None):
+        if self.redo_stack:
+            self.undo_stack.append(self.snapshot())
+            self.restore(self.redo_stack.pop())
+        return "break"
+
+    def end_drag(self, event=None):
+        if self.drag_snapshot is not None:
+            self.remember(self.drag_snapshot)
+            self.drag_snapshot = None
+        self.drag = None
 
     def build(self):
         bar = ttk.Frame(self.root, padding=8)
         bar.pack(fill="x")
-        for label, command in [("Load Background", self.background), ("Add Text", self.add_field), ("Save Layout", self.save), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
+        for label, command in [("Load Background", self.background), ("Add Text", self.add_field), ("Save Layout", self.save), ("Undo", self.undo), ("Redo", self.redo), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
             ttk.Button(bar, text=label, command=command).pack(side="left", padx=3)
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True)
@@ -73,7 +120,7 @@ class App:
         self.canvas.bind("<Configure>", lambda e: self.render())
         self.canvas.bind("<Button-1>", self.select)
         self.canvas.bind("<B1-Motion>", self.move)
-        self.canvas.bind("<ButtonRelease-1>", lambda e: setattr(self, "drag", None))
+        self.canvas.bind("<ButtonRelease-1>", self.end_drag)
         self.render()
 
     def choose_color(self):
@@ -85,12 +132,16 @@ class App:
     def background(self):
         p = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp")])
         if p:
+            before = self.snapshot()
             self.bg_path = p
+            self.remember(before)
             self.render()
 
     def add_field(self):
+        before = self.snapshot()
         f = {"text": "Employee Name", "x": 30.0, "y": 25.0, "size": 12, "family": "Arial", "color": "#000000", "spacing": 0.0}
         self.fields.append(f)
+        self.remember(before)
         self.active = len(self.fields) - 1
         self.sync()
         self.render()
@@ -109,15 +160,19 @@ class App:
     def apply(self):
         if self.active is None: return
         try:
+            before = self.snapshot()
             f = self.fields[self.active]
             f.update(text=self.value.get(), x=float(self.x.get()), y=float(self.y.get()), size=int(self.font.get()), family=self.family.get(), color=self.color.get(), spacing=float(self.spacing.get()))
+            self.remember(before)
             self.render()
         except (ValueError, tk.TclError):
             messagebox.showerror("Invalid value", "Check coordinates, font size, color and spacing.")
 
     def delete(self):
         if self.active is not None:
+            before = self.snapshot()
             self.fields.pop(self.active)
+            self.remember(before)
             self.active = None
             self.render()
 
@@ -157,6 +212,7 @@ class App:
                 if tag.startswith("field_"):
                     self.active = int(tag.split("_")[1])
                     self.drag = (event.x, event.y)
+                    self.drag_snapshot = self.snapshot()
                     self.sync()
                     self.render()
                     return
