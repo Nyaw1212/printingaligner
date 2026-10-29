@@ -110,7 +110,7 @@ class App:
     def build(self):
         bar = ttk.Frame(self.root, padding=8)
         bar.pack(fill="x")
-        for label, command in [("Load Background", self.background), ("Remove BG", self.remove_background), ("Add Text", self.add_field), ("Save Layout", self.save), ("Undo", self.undo), ("Redo", self.redo), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
+        for label, command in [("Load Background", self.background), ("Remove BG", self.remove_background), ("Import Employee", self.import_employee), ("Add Text", self.add_field), ("Save Layout", self.save), ("Undo", self.undo), ("Redo", self.redo), ("Print PDF", self.export_pdf), ("Update & Restart", self.update)]:
             ttk.Button(bar, text=label, command=command).pack(side="left", padx=3)
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True)
@@ -206,6 +206,47 @@ class App:
     def close(self):
         self.autosave()
         self.root.destroy()
+
+    def import_employee(self):
+        source = filedialog.askopenfilename(
+            title="Import Leave Calendar employee",
+            filetypes=[("Employee JSON", "*.json")])
+        if not source:
+            return
+        try:
+            data = json.loads(Path(source).read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                raise ValueError("Expected an employee JSON object.")
+            name = str(data.get("name") or data.get("employeeName") or "").strip()
+            entrance = str(data.get("assumptionDate") or data.get("entranceOfDuty") or "").strip()
+            if not name or not entrance:
+                raise ValueError("Both name and Date of Assumption are required.")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Import Employee", str(exc))
+            return
+        before = self.snapshot()
+        definitions = [
+            ("header_name", name.upper(), 8.0, 5.0, 24),
+            ("name", name.upper(), 24.0, 29.0, 12),
+            ("entrance_of_duty", entrance, 137.0, 35.0, 12),
+        ]
+        for mapping, value, x, y, size in definitions:
+            field = next((item for item in self.fields
+                          if item.get("mapping") == mapping), None)
+            if field is None:
+                field = {"text": value, "x": x, "y": y, "size": size,
+                         "family": "Arial Bold", "color": "#000000",
+                         "spacing": 0.0, "mapping": mapping}
+                self.fields.append(field)
+            else:
+                field["text"] = value
+        self.remember(before)
+        self.active = next(i for i, item in enumerate(self.fields)
+                           if item.get("mapping") == "header_name")
+        self.sync()
+        self.render()
+        messagebox.showinfo("Employee loaded",
+                            "Three mapped fields updated. Existing positions preserved.")
 
     def add_field(self):
         before = self.snapshot()
